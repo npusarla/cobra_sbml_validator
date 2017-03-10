@@ -1,3 +1,4 @@
+
 from gzip import GzipFile
 from bz2 import decompress as bz2_decompress
 from tempfile import NamedTemporaryFile
@@ -27,6 +28,7 @@ executor = tornado.concurrent.futures.ThreadPoolExecutor(8)
 
 validator_form = path.join(path.abspath(path.dirname(__file__)),
                            "validator_form.html")
+
 
 
 def load_JSON(contents):
@@ -139,7 +141,7 @@ def validate_model(model):
                             (reaction.id, ", ".join(sorted(balance))))
 
     # try solving
-    solution = model.optimize(solver="esolver")
+    solution = model.optimize()
     if solution.status != "optimal":
         errors.append("model can not be solved (status '%s')" %
                       solution.status)
@@ -229,11 +231,12 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
 
     args = parser.parse_args()
-
+    
     prefix = args.prefix
     if len(prefix) > 0 and not prefix.startswith("/"):
         prefix = "/" + prefix
 
+    
     run_standalone_server(
         prefix=prefix,
         port=args.port,
