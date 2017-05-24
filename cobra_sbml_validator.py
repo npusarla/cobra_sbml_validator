@@ -1,11 +1,13 @@
-
 from gzip import GzipFile
 from bz2 import decompress as bz2_decompress
 from tempfile import NamedTemporaryFile
 from json import dumps
+from os import mkdir, unlink, path
+from os.path import isdir, isfile, join
+from Bio import Entrez, SeqIO
+import argparse 
 import re
 from warnings import catch_warnings
-from os import unlink, path
 from codecs import getreader
 
 import tornado
@@ -13,6 +15,7 @@ import tornado.ioloop
 import tornado.web
 import tornado.gen
 import tornado.concurrent
+
 
 from six import BytesIO, StringIO, iteritems
 import jsonschema
@@ -29,7 +32,9 @@ executor = tornado.concurrent.futures.ThreadPoolExecutor(8)
 validator_form = path.join(path.abspath(path.dirname(__file__)),
                            "validator_form.html")
 
-
+FOLDER_NAME = 'genbank'
+if not isdir(FOLDER_NAME):
+    mkdir(FOLDER_NAME)
 
 def load_JSON(contents):
     """returns model, [model_errors], "parse_errors" or None """
@@ -159,6 +164,8 @@ def validate_model(model):
 
     return {"errors": errors, "warnings": warnings, "objective": solution.f}
 
+def gen_filepath(accession):
+    return join(FOLDER_NAME, accession + '.gb')
 
 class Upload(tornado.web.RequestHandler):
     def write_error(self, status_code, reason="", **kwargs):
@@ -169,6 +176,11 @@ class Upload(tornado.web.RequestHandler):
     def post(self):
         fileinfo = self.request.files["file"][0]
         filename = fileinfo["filename"]
+
+        my_data = self.request.body_arguments
+        data = my_data["ncbi_accession"][0]
+        print(data)
+        
 
         contents, error = yield executor.submit(
             decompress_file, fileinfo["body"], filename)
@@ -205,20 +217,75 @@ class Upload(tornado.web.RequestHandler):
         result = yield executor.submit(validate_model, model)
         result["errors"].extend(errors)
         result["warnings"].extend(warnings)
+        
+        #import IPython; IPython.embed()
+        
+        gb_filepath = gen_filepath(data)
+        if not isfile(gb_filepath):
+            dl = Entrez.efetch(db='nuccore', id=data, rettype='gbwithparts',
+                            retmode='text')
+            with open(gb_filepath, 'w') as outfile:
+                outfile.write(dl.read())
+            dl.close()
+            print('------------------ DONE writing') 
+        
+
+        #pseudocode
+        gb_seq = SeqIO.read(gb_filepath, 'genbank') 
+        locus_list = []
+        for feature in gb_seq.features:
+           if feature.type == 'CDS':
+               locus_list.append(feature.qualifiers['locus_tag'][0])
+
+        #backup list 
+        gene_list = []
+        for feature in gb_seq.features:
+            if feature.type == 'CDS':
+                for i in feature:
+                    if i is 'gene':
+                        gene_list.append(i[0])
+
+        #pseudocode for checking the genes
+        model_genes = model.genes
+
+        #import IPython; IPython.embed()
+               
+        model_genes_id = []
+        for gene in model_genes:
+            model_genes_id.append(gene.id)
+
+        badGenes = list(set(model_genes_id) - set(locus_list))
+        #backup search 
+        badGenes2 = list(set(badGenes) - set(gene_list))
+        genesToChange = list(set(badGenes).intersection(gene_list))
+        #overallList = list(set(badGenes).intersection(badGenes2))
+        result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
+
+        if len(genesToChange) != 0:
+            result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
+
         self.finish(result)
+        
+       
+        print('------------------ DONE getting genes')
+        
+        #self.finish({ 'status': 'downloaded' })
+    
 
 
 class ValidatorFormHandler(tornado.web.RequestHandler):
         def get(self):
             self.render(validator_form)
 
-
 def run_standalone_server(prefix="", port=5000, debug=False):
     application = tornado.web.Application([
         (prefix + r"/", ValidatorFormHandler),
-        (prefix + r"/upload", Upload),
+        (prefix + r"/upload", Upload)
         ],
-        debug=True)
+        debug=debug)
+    print('Serving on port %d' % port)
+    if debug:
+        print('Debug mode')
     application.listen(port)
     tornado.ioloop.IOLoop.instance().start()
 
@@ -241,3 +308,4 @@ if __name__ == "__main__":
         prefix=prefix,
         port=args.port,
         debug=args.debug)
+    

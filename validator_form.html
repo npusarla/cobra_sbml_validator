@@ -1,5 +1,5 @@
 <!doctype html>
-
+<head>
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,6 +9,7 @@
 <!--dropzone-->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/4.2.0/min/dropzone.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/4.2.0/min/dropzone.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.js"></script>
 
 <!--bootstrap-->
 <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
@@ -23,6 +24,9 @@ div.row {
 </style>
 
 <script>
+
+FILE = null 
+MY_DROPZONE = null
 
 function update_result(file, response) {
     result_list_div = document.getElementById("results");
@@ -52,6 +56,8 @@ function update_result(file, response) {
             file.previewElement.classList.remove("dz-success");
             file.previewElement.classList.add("dz-error");
             result_div.className += " bg-danger";
+            result_div.style.backgroundColor = "lightred";
+
         }
         else {
             result_div.className += " bg-warning";
@@ -83,17 +89,71 @@ function onUploadFail(file, errorMsg, was_xhr) {
     result_div.innerHTML = result_str;
 }
 
+function onSendingFile(file, xhr, formData) {
+    formData.append('ncbi_accession', FILE)
+    //console.log(file, xhr, formData)
+    //console.log(FILE)
+}
+
 Dropzone.options.uploader = {
+    autoProcessQueue : false,
     uploadMultiple: false,
     maxFilesize: 25,
     init: function () {
+        MY_DROPZONE = this
         this.on("success", update_result);
         this.on("error", onUploadFail);
+        this.on("sending", onSendingFile);
     },
 };
 
-</script>
+function didClick () {
 
+    var httpRequest; 
+    var gene = document.getElementById("identifier").value;
+    console.log(gene)
+
+    FILE = gene
+    MY_DROPZONE.processQueue()
+
+    // httpRequest = new XMLHttpRequest();
+
+    // if(!httpRequest){
+    //     alert('Does not work:(');
+    //     return false;
+    // }
+
+    // httpRequest.onreadystatechange = alertContents;
+    // httpRequest.open("POST", "upload", true);
+    // httpRequest.send(gene);
+
+    // function alertContents() {
+    //     if (httpRequest.readyState === XMLHttpRequest.DONE) {
+    //         if (httpRequest.status === 200) {
+    //             console.log('Success. Response: ' + httpRequest.responseText);
+    //             var result_list_div = document.getElementById("results");
+    //             var result_div = result_list_div.appendChild(document.createElement("div"));
+    //             result_div.className = "row bg-danger";
+    //             result_str = "<strong>All genes are valid</strong>";
+    //             result_div.innerHTML = result_str;
+
+    //         } else {
+    //             console.log('There was a problem with the request. CODE: ' + httpRequest.status);
+
+    //             var result_list_div = document.getElementById("results");
+    //             var result_div = result_list_div.appendChild(document.createElement("div"));
+    //             result_div.className = "row bg-danger";
+    //             result_str = "<strong>Bad accession</strong>";
+    //             result_div.innerHTML = result_str;
+    //         }
+    //     }
+    // }
+    
+   
+}
+
+</script>
+</head>
 <body>
     <h1>Validate COBRA models in SBML or JSON</h1>
     <div id="dropzone" class="container">
@@ -106,4 +166,9 @@ Dropzone.options.uploader = {
     <a href="https://github.com/aebrahim/cobra_sbml_validator">
         <img style="position: absolute; top: 0; right: 0; border;" src="https://camo.githubusercontent.com/a6677b08c955af8400f44c6298f40e7d19cc5b2d/68747470733a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f677261795f3664366436642e706e67" alt="Fork me on GitHub" data-canonical-src="https://s3.amazonaws.com/github/ribbons/forkme_right_gray_6d6d6d.png">
     </a>
+    <div>
+        NCBI Genome Accession:<br>
+        <input type="text" id="identifier"><br>
+        <button id="open" onClick="didClick()">GO</button>
+    </div>
 </body>
