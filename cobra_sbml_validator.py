@@ -10,12 +10,12 @@ import re
 from warnings import catch_warnings
 from codecs import getreader
 
-import tornado
-import tornado.ioloop
-import tornado.web
-import tornado.gen
-import tornado.concurrent
-
+from flask import Flask, session
+from flask.ext.session import Session
+app = Flask(__name__)
+SESSION_TYPE = 'redis'
+app.config.from_object(__name__)
+Session(app)
 
 from six import BytesIO, StringIO, iteritems
 import jsonschema
@@ -26,8 +26,6 @@ from cobra.manipulation import check_mass_balance, check_reaction_bounds, \
     check_metabolite_compartment_formula
 
 from libsbml import SBMLValidator
-
-executor = tornado.concurrent.futures.ThreadPoolExecutor(8)
 
 validator_form = path.join(path.abspath(path.dirname(__file__)),
                            "validator_form.html")
@@ -167,127 +165,111 @@ def validate_model(model):
 def gen_filepath(accession):
     return join(FOLDER_NAME, accession + '.gb')
 
-class Upload(tornado.web.RequestHandler):
-    def write_error(self, status_code, reason="", **kwargs):
-        self.write(reason)
+def write_error(self, status_code, reason="", **kwargs):
+    self.write(reason)
 
-    @tornado.web.asynchronous
-    @tornado.gen.engine
-    def post(self):
-        fileinfo = self.request.files["file"][0]
-        filename = fileinfo["filename"]
+@app.route('/upload/')
+def post():
+    fileinfo = self.request.files["file"][0]
+    filename = fileinfo["filename"]
 
-        my_data = self.request.body_arguments
-        data = my_data["ncbi_accession"][0]
-        print(data)
-        
-
-        contents, error = yield executor.submit(
-            decompress_file, fileinfo["body"], filename)
-        if error:
-            self.send_error(415, reason=error)
-            return
-
-        # syntax validation
-        # if the model can't be loaded from the file it's considered invalid
-
-        # if not explicitly JSON, assumed to be SBML
-        warnings = []
-        if filename.endswith(".json") or filename.endswith(".json.gz") or \
-                filename.endswith(".json.bz2"):
-            model, errors, parse_errors = \
-                yield executor.submit(load_JSON, contents)
-
-        else:
-            model, errors, parse_errors = \
-                yield executor.submit(load_SBML, contents, filename)
-            libsbml_errors = yield executor.submit(
-                run_libsbml_validation, contents, filename)
-            warnings.extend("(from libSBML) " + i for i in libsbml_errors)
-
-        # if parsing failed, then send the error
-        if parse_errors:
-            self.send_error(415, reason=parse_errors)
-            return
-        elif model is None:  # parsed, but still could not generate model
-            self.finish({"errors": errors, "warnings": warnings})
-            return
-
-        # model validation
-        result = yield executor.submit(validate_model, model)
-        result["errors"].extend(errors)
-        result["warnings"].extend(warnings)
-        
-        #import IPython; IPython.embed()
-        
-        gb_filepath = gen_filepath(data)
-        if not isfile(gb_filepath):
-            dl = Entrez.efetch(db='nuccore', id=data, rettype='gbwithparts',
-                            retmode='text')
-            with open(gb_filepath, 'w') as outfile:
-                outfile.write(dl.read())
-            dl.close()
-            print('------------------ DONE writing') 
-        
-
-        #pseudocode
-        gb_seq = SeqIO.read(gb_filepath, 'genbank') 
-        locus_list = []
-        for feature in gb_seq.features:
-           if feature.type == 'CDS':
-               locus_list.append(feature.qualifiers['locus_tag'][0])
-
-        #backup list 
-        gene_list = []
-        for feature in gb_seq.features:
-            if feature.type == 'CDS':
-                for i in feature:
-                    if i is 'gene':
-                        gene_list.append(i[0])
-
-        #pseudocode for checking the genes
-        model_genes = model.genes
-
-        #import IPython; IPython.embed()
-               
-        model_genes_id = []
-        for gene in model_genes:
-            model_genes_id.append(gene.id)
-
-        badGenes = list(set(model_genes_id) - set(locus_list))
-        #backup search 
-        badGenes2 = list(set(badGenes) - set(gene_list))
-        genesToChange = list(set(badGenes).intersection(gene_list))
-        #overallList = list(set(badGenes).intersection(badGenes2))
-        result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
-
-        if len(genesToChange) != 0:
-            result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
-
-        self.finish(result)
-        
-       
-        print('------------------ DONE getting genes')
-        
-        #self.finish({ 'status': 'downloaded' })
+    my_data = self.request.body_arguments
+    data = my_data["ncbi_accession"][0]
+    print(data)
     
 
+    contents, error = yield executor.submit(
+        decompress_file, fileinfo["body"], filename)
+    if error:
+        self.send_error(415, reason=error)
+        return
 
-class ValidatorFormHandler(tornado.web.RequestHandler):
-        def get(self):
-            self.render(validator_form)
+    # syntax validation
+    # if the model can't be loaded from the file it's considered invalid
 
-def run_standalone_server(prefix="", port=5000, debug=False):
-    application = tornado.web.Application([
-        (prefix + r"/", ValidatorFormHandler),
-        (prefix + r"/upload", Upload)
-        ],
-        debug=debug)
-    print('Serving on port %d' % port)
-    if debug:
-        print('Debug mode')
-    application.listen(port)
-    tornado.ioloop.IOLoop.instance().start()
+    # if not explicitly JSON, assumed to be SBML
+    warnings = []
+    if filename.endswith(".json") or filename.endswith(".json.gz") or \
+            filename.endswith(".json.bz2"):
+        model, errors, parse_errors = \
+            yield executor.submit(load_JSON, contents)
+
+    else:
+        model, errors, parse_errors = \
+            yield executor.submit(load_SBML, contents, filename)
+        libsbml_errors = yield executor.submit(
+            run_libsbml_validation, contents, filename)
+        warnings.extend("(from libSBML) " + i for i in libsbml_errors)
+
+    # if parsing failed, then send the error
+    if parse_errors:
+        self.send_error(415, reason=parse_errors)
+        return
+    elif model is None:  # parsed, but still could not generate model
+        self.finish({"errors": errors, "warnings": warnings})
+        return
+
+    # model validation
+    result = yield executor.submit(validate_model, model)
+    result["errors"].extend(errors)
+    result["warnings"].extend(warnings)
+    
+    #import IPython; IPython.embed()
+    
+    gb_filepath = gen_filepath(data)
+    if not isfile(gb_filepath):
+        dl = Entrez.efetch(db='nuccore', id=data, rettype='gbwithparts',
+                        retmode='text')
+        with open(gb_filepath, 'w') as outfile:
+            outfile.write(dl.read())
+        dl.close()
+        print('------------------ DONE writing') 
+    
+
+    #pseudocode
+    gb_seq = SeqIO.read(gb_filepath, 'genbank') 
+    locus_list = []
+    for feature in gb_seq.features:
+       if feature.type == 'CDS':
+           locus_list.append(feature.qualifiers['locus_tag'][0])
+
+    #backup list 
+    gene_list = []
+    for feature in gb_seq.features:
+        if feature.type == 'CDS':
+            for i in feature:
+                if i is 'gene':
+                    gene_list.append(i[0])
+
+    #pseudocode for checking the genes
+    model_genes = model.genes
+
+    #import IPython; IPython.embed()
+           
+    model_genes_id = []
+    for gene in model_genes:
+        model_genes_id.append(gene.id)
+
+    badGenes = list(set(model_genes_id) - set(locus_list))
+    #backup search 
+    badGenes2 = list(set(badGenes) - set(gene_list))
+    genesToChange = list(set(badGenes).intersection(gene_list))
+    #overallList = list(set(badGenes).intersection(badGenes2))
+    result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
+
+    if len(genesToChange) != 0:
+        result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
+
+    self.finish(result)
+    
+   
+    print('------------------ DONE getting genes')
+    
+    #self.finish({ 'status': 'downloaded' })
+    
+@app.route('/')
+def get():
+    self.render(validator_form)
 
 if __name__ == "__main__":
     import argparse
