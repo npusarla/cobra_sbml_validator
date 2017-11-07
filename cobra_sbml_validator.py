@@ -9,6 +9,7 @@ import argparse
 import re
 from warnings import catch_warnings
 from codecs import getreader
+import time
 
 from six import BytesIO, StringIO, iteritems
 import jsonschema
@@ -21,6 +22,7 @@ from cobra.manipulation import check_mass_balance, check_reaction_bounds, \
 from libsbml import SBMLValidator
 
 from flask import Flask, session, render_template, request, jsonify
+from celery import Celery
 from flask_session import Session
 app = Flask(__name__, template_folder='.')
 SESSION_TYPE = 'redis'
@@ -30,10 +32,19 @@ Session(app)
 validator_form = path.join(path.abspath(path.dirname(__file__)),
                            "validator_form.html")
 
+app = Flask(__name__)
+app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
+app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
+
+#initialize celery
+celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+celery.conf.update(app.config)
+
 FOLDER_NAME = 'genbank'
 if not isdir(FOLDER_NAME):
     mkdir(FOLDER_NAME)
 
+@celery.task
 def load_JSON(contents):
     """returns model, [model_errors], "parse_errors" or None """
     errors = []
@@ -62,7 +73,7 @@ def load_JSON(contents):
             errors.append(e.message)
     return model, errors, None
 
-
+@celery.task
 def load_SBML(contents, filename):
     """returns model, [model_errors], "parse_errors" or None """
     try:  # this function fails if a model can not be created
@@ -74,6 +85,7 @@ def load_SBML(contents, filename):
         return model, errors, None
 
 
+@celery.task
 def run_libsbml_validation(contents, filename):
     if filename.endswith(".gz"):
         filename = filename[:-3]
@@ -94,7 +106,7 @@ def run_libsbml_validation(contents, filename):
                                        failure.getMessage()))
     return errors
 
-
+@celery.task
 def decompress_file(body, filename):
     """returns BytesIO of decompressed file"""
     if filename.endswith(".gz"):
@@ -116,6 +128,7 @@ def decompress_file(body, filename):
     return contents, None
 
 
+@celery.task
 def validate_model(model):
     errors = []
     warnings = []
@@ -162,11 +175,38 @@ def validate_model(model):
 
     return {"errors": errors, "warnings": warnings, "objective": solution.f}
 
+
 def gen_filepath(accession):
     return join(FOLDER_NAME, accession + '.gb')
 
 # def write_error(self, status_code, reason="", **kwargs):
 #     self.write(reason)
+
+
+@app.route('/status/<task_id>')
+def taskstatus(task_id):
+    task = handle_uploaded_file.AsyncResult(task_id)
+    if task.state == 'PENDING':
+        # job did not start yet
+        response = {
+            'state': task.state,
+            'status': 'Pending...'
+        }
+    elif task.state != 'FAILURE':
+        response = {
+            'state': task.state,
+            'model_warnings': task.info.get('model_warnings', []),
+            'model_errors': task.info.get('model_errors', []),
+            'status': task.info.get('status', '')
+        }
+    else:
+        # something went wrong in the background job
+        response = {
+            'state': task.state,
+            'status': str(task.info),  # this is the exception raised
+        }
+    return jsonify(response)
+
 
 @app.route('/upload', methods=['POST'])
 def upload():
@@ -175,34 +215,43 @@ def upload():
     fileinfo = request.files['file']
     filename = fileinfo.filename
 
-    data = request.form["ncbi_accession"]
+    #data = request.form["ncbi_accession"]
 
-    contents, error = decompress_file(fileinfo.body, filename)
+    # option 1: synchronous, < 100ms
+    # t = time.time()
+    # contents, error = decompress_file(fileinfo.body, filename)
+    # print(f'took {time.time() - t}')
 
-    return jsonify({'errors': ['test error'], 'warnings': ['test warning']})
+    # option 2: synchronous with celery, < 100ms
+    # t = time.time()
+    # result = decompress_file.apply_async(args=(fileinfo.body, filename))
+    # contents, error = result.get()
+    # print(f'took {time.time() - t}')
 
-    # fileinfo = self.request.files["file"][0]
-    # filename = fileinfo["filename"]
-
-    # my_data = self.request.body_arguments
-    # data = my_data["ncbi_accession"][0]
-    # print(data)
-    
-
+    # option 2: async within a HTTP query, < 2 seconds
     # contents, error = yield executor.submit(
-    #     decompress_file, fileinfo["body"], filename)
+    #      decompress_file_fn, fileinfo["body"], filename)
+
+    # option 3: task in background (actually synchronous), > 2 seconds
+    task = handle_uploaded_file.apply_async(args=(fileinfo.body, filename))
+    # TODO return task.id to user
+    return jsonify({'task_id': task.id})
+
+
+
+    # return jsonify({'errors': ['test error'], 'warnings': ['test warning']})
+
     # if error:
-    #     self.send_error(415, reason=error)
-    #     return
+        #error handling?
 
-    # # syntax validation
-    # # if the model can't be loaded from the file it's considered invalid
+     # syntax validation
+     # if the model can't be loaded from the file it's considered invalid
 
-    # # if not explicitly JSON, assumed to be SBML
-    # warnings = []
-    # if filename.endswith(".json") or filename.endswith(".json.gz") or \
-    #         filename.endswith(".json.bz2"):
-    #     model, errors, parse_errors = \
+     # if not explicitly JSON, assumed to be SBML
+     # warnings = []
+     # if filename.endswith(".json") or filename.endswith(".json.gz") or \
+     #        filename.endswith(".json.bz2"):
+     #    model, errors, parse_errors = \
     #         yield executor.submit(load_JSON, contents)
 
     # else:
