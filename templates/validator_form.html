@@ -54,35 +54,6 @@ function start_handling_file(){
     });
 }
 
-function update_progress(status_url, nanobar, status_div) {
-        // send GET request to status URL
-        $.getJSON(status_url, function(data) {
-            // update UI
-            percent = parseInt(data['current'] * 100 / data['total']);
-            nanobar.go(percent);
-            $(status_div.childNodes[1]).text(percent + '%');
-            $(status_div.childNodes[2]).text(data['status']);
-            if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
-                if ('result' in data) {
-                    // show result
-                    $(status_div.childNodes[3]).text('Result: ' + data['result']);
-                }
-                else {
-                    // something unexpected happened
-                    $(status_div.childNodes[3]).text('Result: ' + data['state']);
-                }
-            }
-            else {
-                // rerun in 2 seconds
-                setTimeout(function() {
-                    update_progress(status_url, nanobar, status_div);
-                }, 2000);
-            }
-        });
-    }
-
-
-
 function update_result(file, response) {
     result_list_div = document.getElementById("results");
     result_div = result_list_div.appendChild(document.createElement("div"));
@@ -144,13 +115,11 @@ function onUploadFail(file, errorMsg, was_xhr) {
     result_div.innerHTML = result_str;
 }
 
-/**
 function onSendingFile(file, xhr, formData) {
     formData.append('ncbi_accession', FILE)
     //console.log(file, xhr, formData)
     //console.log(FILE)
-}*/
-
+}
 
 Dropzone.options.uploader = {
     autoProcessQueue : false,
@@ -160,11 +129,10 @@ Dropzone.options.uploader = {
         MY_DROPZONE = this
         this.on("success", update_result);
         this.on("error", onUploadFail);
-        //this.on("sending", onSendingFile);
+        this.on("sending", onSendingFile);
     },
 };
 
-/**
 function didClick () {
 
     var httpRequest; 
@@ -209,7 +177,6 @@ function didClick () {
     
    
 }
-*/
 
 </script>
 </head>
