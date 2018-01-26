@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/4.2.0/min/dropzone.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/4.2.0/min/dropzone.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.js"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/nanobar/0.2.1/nanobar.min.js"></script>
 
 <!--bootstrap-->
 <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
@@ -25,60 +26,91 @@ div.row {
 
 <script>
 
-FILE = null 
-MY_DROPZONE = null
+var FILE = null 
+var MY_DROPZONE = null
 
 //NEW PROGRESS BAR
-function start_handling_file(){
+function start_handling_file (file, response) {
+    
     // add task status elements 
-    div = $('<div class="progress"><div></div><div>0%</div><div>...</div><div>&nbsp;</div></div><hr>');
-    $('#progress').append(div);
+    // div = $('<div class="progress"></div>');
+    // $('#progress').append(div);
 
     // create a progress bar
-    var nanobar = new Nanobar({
-        bg: '#44f',
-        target: div[0].childNodes[0]
-    });
+    // var nanobar = new Nanobar({bg: '#44f', target: div[0].childNodes[0]});
 
     // send ajax POST request to start background job
-    $.ajax({
-        type: 'POST',
-        url: '/upload',
-        success: function(data, status, request) {
-            status_url = request.getResponseHeader('Location');
-            update_result(status_url, nanobar, div[0]);
-        },
-        error: function() {
-            alert('Unexpected error');
+    
+    // status_url = request.getResponseHeader('Location');
+    update_progress(response.Location, null, $('#results'));
+
+
+    
+}
+
+function update_progress(status_url, nanobar, status_div) {
+    console.log('working')
+    status_div.text('WORKING')   
+    // send GET request to status URL
+    $.getJSON(status_url, function(data) {
+        // update UI
+        // percent = parseInt(data['current'] * 100 / data['total']);
+        // nanobar.go(percent);
+        // $(status_div.childNodes[1]).text(percent + '%');
+        // $(status_div.childNodes[2]).text(data['status']);
+        if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
+            if ('model_errors' in data || 'model_warnings' in data) {
+                // show result
+                status_div.text('Result: ' + data['model_warnings'] + data['model_errors']);
+            }
+            else {
+                // something unexpected happened
+                status_div.text('Result: ' + data['state']);
+            }
+        }
+        else {
+            // rerun in 2 seconds
+            setTimeout(function() {
+                update_progress(status_url, nanobar, status_div);
+            }, 2000);
         }
     });
 }
 
-function update_result(file, response) {
+var ex_object = {
+    'my': 'obj',
+}
+
+function update_result(data, errors, warnings) {
+    console.log('update_result')
+    console.log(data)
     result_list_div = document.getElementById("results");
     result_div = result_list_div.appendChild(document.createElement("div"));
     result_div.className = "row";
-    results = response;  // results = JSON.parse(response); (for text/html)
-
+    // results = JSON.parse(response); (for text/html)
+    console.log(results)
     // build the result str
     result_str = "<strong>" + file.name + "</strong>&nbsp;-&nbsp;";
-    if (results.errors.length == 0 && results.warnings.length == 0) {
+    if (results['errors'] == 0 && results['warnings'] == 0) {
         result_div.className += " bg-success";
         result_str += "No errors<br>"
         file.previewElement.querySelector(".dz-success-mark").style.opacity = 1;
+
     }
     else {
-        result_str += results.errors.length + " error";
-        if (results.errors.length > 1 || results.errors.length == 0) result_str += "s";
-        if (results.warnings.length > 0) {
-            result_str += " and " +  results.warnings.length + " warning";
-            if (results.warnings.length > 1) result_str += "s";
+        result_str += results['errors'] + " error";
+        console.log(results['errors'])
+        console.log(result_str); 
+        if (results['errors'] > 1 || results['errors'] == 0) result_str += "s";
+        if (results['warnings'] > 0) {
+            result_str += " and " +  results['warnings'] + " warning";
+            if (results['warnings'] > 1) result_str += "s";
         }
         // update the error message on the dropzone preview
         msg = file.previewElement.querySelector(".dz-error-message").getElementsByTagName("span")[0];
         msg.innerHTML = result_str;
         // color as error (or warning if no errors)
-        if (results.errors.length > 0) {
+        if (results['errors'] > 0) {
             file.previewElement.classList.remove("dz-success");
             file.previewElement.classList.add("dz-error");
             result_div.className += " bg-danger";
@@ -91,15 +123,18 @@ function update_result(file, response) {
 
         // display the rest of the errors in the result_list
         result_str += "<br>";
-        for (var i = 0; i < results.errors.length; i++) {
-            result_str += "Error: " + results.errors[i] + "<br>";
+        for (var i = 0; i < results['errors']; i++) {
+            result_str += "Error: " + results['errors'][i] + "<br>";
         }
-        for (var i = 0; i < results.warnings.length; i++) {
-            result_str += "Warning: " + results.warnings[i] + "<br>";
+        for (var i = 0; i < results['warnings']; i++) {
+            result_str += "Warning: " + results['warnings'][i] + "<br>";
         }
     }
     if ('objective' in results)
-        result_str += "objective value: " + results.objective;
+        result_str += "objective value: " + results['objective'];
+
+    console.log("end")
+
 
     // add result str to result_div
     span = result_div.appendChild(document.createElement("span"));
@@ -107,6 +142,7 @@ function update_result(file, response) {
 }
 
 function onUploadFail(file, errorMsg, was_xhr) {
+    console.log('onUploadFail')
     result_list_div = document.getElementById("results");
     result_div = result_list_div.appendChild(document.createElement("div"));
     result_div.className = "row bg-danger";
@@ -115,24 +151,28 @@ function onUploadFail(file, errorMsg, was_xhr) {
     result_div.innerHTML = result_str;
 }
 
+/**
 function onSendingFile(file, xhr, formData) {
     formData.append('ncbi_accession', FILE)
     //console.log(file, xhr, formData)
     //console.log(FILE)
-}
+}*/
 
+console.log('init code')
 Dropzone.options.uploader = {
-    autoProcessQueue : false,
+    autoProcessQueue : true,
     uploadMultiple: false,
     maxFilesize: 25,
     init: function () {
+        console.log('init')
         MY_DROPZONE = this
-        this.on("success", update_result);
+        this.on("success", start_handling_file);
         this.on("error", onUploadFail);
-        this.on("sending", onSendingFile);
+        this.on("sending", function () { console.log('sending') });
     },
 };
 
+/**
 function didClick () {
 
     var httpRequest; 
@@ -177,6 +217,7 @@ function didClick () {
     
    
 }
+*/
 
 </script>
 </head>
@@ -187,6 +228,7 @@ function didClick () {
             <div class="dz-message">Drop SBML/JSON files here or click to upload. Compressed (gz and bz2) files are also accepted.</div>
         </form>
     </div>
+    <div id="progress"></div>
     <div id="results" class="container"></div>
     <!-- github ribbon -->
     <a href="https://github.com/aebrahim/cobra_sbml_validator">

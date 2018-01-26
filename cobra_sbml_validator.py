@@ -120,7 +120,7 @@ def decompress_file(body, filename):
         except IOError as e:
             return None, "Error decompressing bz2 file: " + str(e)
     else:
-        contents = BytesIO((body))
+        contents = BytesIO(body.encode('utf8'))
     return contents, None
 
 
@@ -181,8 +181,8 @@ def gen_filepath(accession):
 @celery.task
 def handle_uploaded_file(info, name):
     contents, error = decompress_file(info, name)
-    if error: 
-        return jsonify({'errors': error, 'warnings': warnings})
+    if error:
+        return {'errors': error, 'warnings': warnings}
 
     warnings = []
     if name.endswith(".json") or name.endswith(".json.gz") or \
@@ -198,16 +198,16 @@ def handle_uploaded_file(info, name):
 
     # if parsing failed, then send the error
     if parse_errors:
-        return jsonify({'errors': error, 'warnings': warnings})
+        return {'errors': error, 'warnings': warnings}
     if model is None:  # parsed, but still could not generate model
-        return jsonify({'errors': error, 'warnings': warnings})
+        return {'errors': error, 'warnings': warnings}
 
     # model validation
     result = validate_model(model)
     result["errors"].extend(errors)
     result["warnings"].extend(warnings)
 
-    return jsonify(result)
+    return result
 
     # #import IPython; IPython.embed()
     
@@ -267,6 +267,7 @@ def handle_uploaded_file(info, name):
 @app.route('/status/<task_id>')
 def taskstatus(task_id):
     task = handle_uploaded_file.AsyncResult(task_id)
+    #import IPython; IPython.embed()
     if task.state == 'PENDING':
         # job did not start yet
         response = {
