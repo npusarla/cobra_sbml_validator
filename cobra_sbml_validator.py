@@ -179,10 +179,13 @@ def gen_filepath(accession):
 #     self.write(reason)
 
 @celery.task
-def handle_uploaded_file(info, name):
+def handle_uploaded_file(info, name, genbank_id):
+    result = validate_model(model)
     contents, error = decompress_file(info, name)
     if error:
-        return {'errors': error, 'warnings': warnings}
+        result["errors"].extend(errors)
+        result["warnings"].extend(warnings)
+        return result
 
     warnings = []
     if name.endswith(".json") or name.endswith(".json.gz") or \
@@ -198,62 +201,62 @@ def handle_uploaded_file(info, name):
 
     # if parsing failed, then send the error
     if parse_errors:
-        return {'errors': error, 'warnings': warnings}
+        result["errors"].extend(errors)
+        result["warnings"].extend(warnings)
+        return result
     if model is None:  # parsed, but still could not generate model
-        return {'errors': error, 'warnings': warnings}
+        result["errors"].extend(errors)
+        result["warnings"].extend(warnings)
+        return result
 
     # model validation
-    result = validate_model(model)
-    result["errors"].extend(errors)
+    result["errors"].extend(error)
     result["warnings"].extend(warnings)
 
-    return result
+    
+    gb_filepath = gen_filepath(genbank_id)
+    if not isfile(gb_filepath):
+        dl = Entrez.efetch(db='nuccore', id=data, rettype='gbwithparts',
+                         retmode='text')
+        with open(gb_filepath, 'w') as outfile:
+             outfile.write(dl.read())
+        dl.close()
+        print('------------------ DONE writing') 
 
-    # #import IPython; IPython.embed()
-    
-    # gb_filepath = gen_filepath(data)
-    # if not isfile(gb_filepath):
-    #     dl = Entrez.efetch(db='nuccore', id=data, rettype='gbwithparts',
-    #                     retmode='text')
-    #     with open(gb_filepath, 'w') as outfile:
-    #         outfile.write(dl.read())
-    #     dl.close()
-    #     print('------------------ DONE writing') 
-    
 
     # #pseudocode
-    # gb_seq = SeqIO.read(gb_filepath, 'genbank') 
-    # locus_list = []
-    # for feature in gb_seq.features:
-    #    if feature.type == 'CDS':
-    #        locus_list.append(feature.qualifiers['locus_tag'][0])
+    gb_seq = SeqIO.read(gb_filepath, 'genbank') 
+    locus_list = []
+    for feature in gb_seq.features:
+       if feature.type == 'CDS':
+           locus_list.append(feature.qualifiers['locus_tag'][0])
 
-    # #backup list 
-    # gene_list = []
-    # for feature in gb_seq.features:
-    #     if feature.type == 'CDS':
-    #         for i in feature:
-    #             if i is 'gene':
-    #                 gene_list.append(i[0])
+     #backup list 
+    gene_list = []
+    for feature in gb_seq.features:
+        if feature.type == 'CDS':
+            for i in feature:
+                if i is 'gene':
+                    gene_list.append(i[0])
 
     # #pseudocode for checking the genes
-    # model_genes = model.genes
+    model_genes = model.genes
 
     # #import IPython; IPython.embed()
            
-    # model_genes_id = []
-    # for gene in model_genes:
-    #     model_genes_id.append(gene.id)
+    model_genes_id = []
+    for gene in model_genes:
+        model_genes_id.append(gene.id)
 
-    # badGenes = list(set(model_genes_id) - set(locus_list))
+    badGenes = list(set(model_genes_id) - set(locus_list))
     # #backup search 
-    # badGenes2 = list(set(badGenes) - set(gene_list))
-    # genesToChange = list(set(badGenes).intersection(gene_list))
-    # #overallList = list(set(badGenes).intersection(badGenes2))
-    # result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
+    badGenes2 = list(set(badGenes) - set(gene_list))
+    genesToChange = list(set(badGenes).intersection(gene_list))
+    overallList = list(set(badGenes).intersection(badGenes2))
+    result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
 
-    # if len(genesToChange) != 0:
-    #     result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
+    if len(genesToChange) != 0:
+         result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
 
 
     # self.finish(result)
@@ -262,6 +265,7 @@ def handle_uploaded_file(info, name):
     # print('------------------ DONE getting genes')
     
     # #self.finish({ 'status': 'downloaded' })
+    return result
 
 
 @app.route('/status/<task_id>')
@@ -296,10 +300,13 @@ def upload():
 
     try:
         fileinfo = request.files['file']
+        geneinfo = request.form
     except BadRequestKeyError as e:
         print('Could not find file')
         raise e
     filename = fileinfo.filename
+    gene_id = geneinfo['ncbi_accession']
+    print (gene_id)
 
     #data = request.form["ncbi_accession"]
 
@@ -319,8 +326,11 @@ def upload():
     #      decompress_file_fn, fileinfo["body"], filename)
 
     # option 3: task in background (actually synchronous), > 2 seconds
+
+
+
     task = handle_uploaded_file.apply_async(
-        args=(fileinfo.stream.read().decode('utf8'), filename)
+        args=(fileinfo.stream.read().decode('utf8'), filename, gene_id)
     )
    
     return jsonify({'Location': url_for('taskstatus', task_id=task.id)})
