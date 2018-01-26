@@ -9,28 +9,34 @@ import argparse
 import re
 from warnings import catch_warnings
 from codecs import getreader
-
-import tornado
-import tornado.ioloop
-import tornado.web
-import tornado.gen
-import tornado.concurrent
-
+import time
 
 from six import BytesIO, StringIO, iteritems
 import jsonschema
 
 import cobra
-from cobra.core.Gene import parse_gpr
+from cobra.core.gene import parse_gpr
 from cobra.manipulation import check_mass_balance, check_reaction_bounds, \
     check_metabolite_compartment_formula
 
 from libsbml import SBMLValidator
 
-executor = tornado.concurrent.futures.ThreadPoolExecutor(8)
+from flask import Flask, session, render_template, request, jsonify, url_for
+from werkzeug.exceptions import BadRequestKeyError
+from celery import Celery
+from flask_session import Session
+app = Flask(__name__, template_folder='.')
+SESSION_TYPE = 'redis'
+app.config.from_object(__name__)
+Session(app)
 
-validator_form = path.join(path.abspath(path.dirname(__file__)),
-                           "validator_form.html")
+app = Flask(__name__)
+app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
+app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
+
+#initialize celery
+celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+celery.conf.update(app.config)
 
 FOLDER_NAME = 'genbank'
 if not isdir(FOLDER_NAME):
@@ -114,8 +120,9 @@ def decompress_file(body, filename):
         except IOError as e:
             return None, "Error decompressing bz2 file: " + str(e)
     else:
-        contents = BytesIO((body))
+        contents = BytesIO(body.encode('utf8'))
     return contents, None
+
 
 
 def validate_model(model):
@@ -164,148 +171,194 @@ def validate_model(model):
 
     return {"errors": errors, "warnings": warnings, "objective": solution.f}
 
+
 def gen_filepath(accession):
     return join(FOLDER_NAME, accession + '.gb')
 
-class Upload(tornado.web.RequestHandler):
-    def write_error(self, status_code, reason="", **kwargs):
-        self.write(reason)
+# def write_error(self, status_code, reason="", **kwargs):
+#     self.write(reason)
 
-    @tornado.web.asynchronous
-    @tornado.gen.engine
-    def post(self):
-        fileinfo = self.request.files["file"][0]
-        filename = fileinfo["filename"]
-
-        my_data = self.request.body_arguments
-        data = my_data["ncbi_accession"][0]
-        print(data)
-        
-
-        contents, error = yield executor.submit(
-            decompress_file, fileinfo["body"], filename)
-        if error:
-            self.send_error(415, reason=error)
-            return
-
-        # syntax validation
-        # if the model can't be loaded from the file it's considered invalid
-
-        # if not explicitly JSON, assumed to be SBML
-        warnings = []
-        if filename.endswith(".json") or filename.endswith(".json.gz") or \
-                filename.endswith(".json.bz2"):
-            model, errors, parse_errors = \
-                yield executor.submit(load_JSON, contents)
-
-        else:
-            model, errors, parse_errors = \
-                yield executor.submit(load_SBML, contents, filename)
-            libsbml_errors = yield executor.submit(
-                run_libsbml_validation, contents, filename)
-            warnings.extend("(from libSBML) " + i for i in libsbml_errors)
-
-        # if parsing failed, then send the error
-        if parse_errors:
-            self.send_error(415, reason=parse_errors)
-            return
-        elif model is None:  # parsed, but still could not generate model
-            self.finish({"errors": errors, "warnings": warnings})
-            return
-
-        # model validation
-        result = yield executor.submit(validate_model, model)
+@celery.task
+def handle_uploaded_file(info, name, genbank_id):
+    result = validate_model(model)
+    contents, error = decompress_file(info, name)
+    if error:
         result["errors"].extend(errors)
         result["warnings"].extend(warnings)
-        
-        #import IPython; IPython.embed()
-        
-        gb_filepath = gen_filepath(data)
-        if not isfile(gb_filepath):
-            dl = Entrez.efetch(db='nuccore', id=data, rettype='gbwithparts',
-                            retmode='text')
-            with open(gb_filepath, 'w') as outfile:
-                outfile.write(dl.read())
-            dl.close()
-            print('------------------ DONE writing') 
-        
+        return result
 
-        #pseudocode
-        gb_seq = SeqIO.read(gb_filepath, 'genbank') 
-        locus_list = []
-        for feature in gb_seq.features:
-           if feature.type == 'CDS':
-               locus_list.append(feature.qualifiers['locus_tag'][0])
+    warnings = []
+    if name.endswith(".json") or name.endswith(".json.gz") or \
+                name.endswith(".json.bz2"):
+            model, errors, parse_errors = \
+                load_JSON(contents)
 
-        #backup list 
-        gene_list = []
-        for feature in gb_seq.features:
-            if feature.type == 'CDS':
-                for i in feature:
-                    if i is 'gene':
-                        gene_list.append(i[0])
+    else:
+        model, errors, parse_errors = \
+            load_SBML(contents, name)
+        libsbml_errors = run_libsbml_validation(contents, name)
+        warnings.extend("(from libSBML) " + i for i in libsbml_errors)
 
-        #pseudocode for checking the genes
-        model_genes = model.genes
+    # if parsing failed, then send the error
+    if parse_errors:
+        result["errors"].extend(errors)
+        result["warnings"].extend(warnings)
+        return result
+    if model is None:  # parsed, but still could not generate model
+        result["errors"].extend(errors)
+        result["warnings"].extend(warnings)
+        return result
 
-        #import IPython; IPython.embed()
-               
-        model_genes_id = []
-        for gene in model_genes:
-            model_genes_id.append(gene.id)
+    # model validation
+    result["errors"].extend(error)
+    result["warnings"].extend(warnings)
 
-        badGenes = list(set(model_genes_id) - set(locus_list))
-        #backup search 
-        badGenes2 = list(set(badGenes) - set(gene_list))
-        genesToChange = list(set(badGenes).intersection(gene_list))
-        #overallList = list(set(badGenes).intersection(badGenes2))
-        result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
-
-        if len(genesToChange) != 0:
-            result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
-
-        self.finish(result)
-        
-       
-        print('------------------ DONE getting genes')
-        
-        #self.finish({ 'status': 'downloaded' })
     
+    gb_filepath = gen_filepath(genbank_id)
+    if not isfile(gb_filepath):
+        dl = Entrez.efetch(db='nuccore', id=data, rettype='gbwithparts',
+                         retmode='text')
+        with open(gb_filepath, 'w') as outfile:
+             outfile.write(dl.read())
+        dl.close()
+        print('------------------ DONE writing') 
 
 
-class ValidatorFormHandler(tornado.web.RequestHandler):
-        def get(self):
-            self.render(validator_form)
+    # #pseudocode
+    gb_seq = SeqIO.read(gb_filepath, 'genbank') 
+    locus_list = []
+    for feature in gb_seq.features:
+       if feature.type == 'CDS':
+           locus_list.append(feature.qualifiers['locus_tag'][0])
 
-def run_standalone_server(prefix="", port=5000, debug=False):
-    application = tornado.web.Application([
-        (prefix + r"/", ValidatorFormHandler),
-        (prefix + r"/upload", Upload)
-        ],
-        debug=debug)
-    print('Serving on port %d' % port)
-    if debug:
-        print('Debug mode')
-    application.listen(port)
-    tornado.ioloop.IOLoop.instance().start()
+     #backup list 
+    gene_list = []
+    for feature in gb_seq.features:
+        if feature.type == 'CDS':
+            for i in feature:
+                if i is 'gene':
+                    gene_list.append(i[0])
+
+    # #pseudocode for checking the genes
+    model_genes = model.genes
+
+    # #import IPython; IPython.embed()
+           
+    model_genes_id = []
+    for gene in model_genes:
+        model_genes_id.append(gene.id)
+
+    badGenes = list(set(model_genes_id) - set(locus_list))
+    # #backup search 
+    badGenes2 = list(set(badGenes) - set(gene_list))
+    genesToChange = list(set(badGenes).intersection(gene_list))
+    overallList = list(set(badGenes).intersection(badGenes2))
+    result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
+
+    if len(genesToChange) != 0:
+         result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
+
+
+    # self.finish(result)
+    
+   
+    # print('------------------ DONE getting genes')
+    
+    # #self.finish({ 'status': 'downloaded' })
+    return result
+
+
+@app.route('/status/<task_id>')
+def taskstatus(task_id):
+    task = handle_uploaded_file.AsyncResult(task_id)
+    #import IPython; IPython.embed()
+    if task.state == 'PENDING':
+        # job did not start yet
+        response = {
+            'state': task.state,
+            'status': 'Pending...'
+        }
+    #or I can change this to only when its successful 
+    elif task.state != 'FAILURE':
+        response = {
+            'state': task.state,
+            'model_warnings': task.info.get('warnings', []),
+            'model_errors': task.info.get('errors', []),
+            'status': task.info.get('status', '')
+        }
+    else:
+        # something went wrong in the background job
+        response = {
+            'state': task.state,
+            'status': str(task.info),  # this is the exception raised
+        }
+    return jsonify(response)
+
+
+@app.route('/upload', methods=['POST'])
+def upload():
+
+    try:
+        fileinfo = request.files['file']
+        geneinfo = request.form
+    except BadRequestKeyError as e:
+        print('Could not find file')
+        raise e
+    filename = fileinfo.filename
+    gene_id = geneinfo['ncbi_accession']
+    print (gene_id)
+
+    #data = request.form["ncbi_accession"]
+
+    # option 1: synchronous, < 100ms
+    # t = time.time()
+    # contents, error = decompress_file(fileinfo.body, filename)
+    # print(f'took {time.time() - t}')
+
+    # option 2: synchronous with celery, < 100ms
+    # t = time.time()
+    # result = decompress_file.apply_async(args=(fileinfo.body, filename))
+    # contents, error = result.get()
+    # print(f'took {time.time() - t}')
+
+    # option 2: async within a HTTP query, < 2 seconds
+    # contents, error = yield executor.submit(
+    #      decompress_file_fn, fileinfo["body"], filename)
+
+    # option 3: task in background (actually synchronous), > 2 seconds
+
+
+
+    task = handle_uploaded_file.apply_async(
+        args=(fileinfo.stream.read().decode('utf8'), filename, gene_id)
+    )
+   
+    return jsonify({'Location': url_for('taskstatus', task_id=task.id)})
+    
+    
+@app.route('/')
+def get():
+    return render_template('validator_form.html')
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(
-        description="web-based validator for COBRA models in SBML and JSON")
-    parser.add_argument("--port", type=int, default=5000)
-    parser.add_argument("--prefix", default="")
-    parser.add_argument("--debug", action="store_true")
+    app.run(threaded=True, debug=True)
 
-    args = parser.parse_args()
+    # import argparse
+    # parser = argparse.ArgumentParser(
+    #     description="web-based validator for COBRA models in SBML and JSON")
+    # parser.add_argument("--port", type=int, default=5000)
+    # parser.add_argument("--prefix", default="")
+    # parser.add_argument("--debug", action="store_true")
+
+    # args = parser.parse_args()
     
-    prefix = args.prefix
-    if len(prefix) > 0 and not prefix.startswith("/"):
-        prefix = "/" + prefix
+    # prefix = args.prefix
+    # if len(prefix) > 0 and not prefix.startswith("/"):
+    #     prefix = "/" + prefix
 
     
-    run_standalone_server(
-        prefix=prefix,
-        port=args.port,
-        debug=args.debug)
+    # run_standalone_server(
+    #     prefix=prefix,
+    #     port=args.port,
+    #     debug=args.debug)
     
