@@ -180,39 +180,52 @@ def gen_filepath(accession):
 
 @celery.task
 def handle_uploaded_file(info, name, genbank_id):
-    result = validate_model(model)
-    contents, error = decompress_file(info, name)
-    if error:
-        result["errors"].extend(errors)
-        result["warnings"].extend(warnings)
-        return result
+    contents, decompress_error = decompress_file(info, name)
+    if decompress_error:
+        return {
+            "errors": [decompress_error],
+            "warnings": [],
+        }
 
+    errors = []
     warnings = []
-    if name.endswith(".json") or name.endswith(".json.gz") or \
-                name.endswith(".json.bz2"):
-            model, errors, parse_errors = \
-                load_JSON(contents)
+    parse_errors = None
+    if name.endswith(".json") or name.endswith(".json.gz") or name.endswith(".json.bz2"):
+        print("im in")
+        model, load_json_errors, load_json_parse_errors = load_JSON(contents)
+        parse_errors = load_json_parse_errors
 
     else:
-        model, errors, parse_errors = \
-            load_SBML(contents, name)
+        print("diff ending")
+        model, load_sbml_errors, load_sbml_parse_errors = load_SBML(contents, name)
+        parse_errors = load_sbml_parse_errors
         libsbml_errors = run_libsbml_validation(contents, name)
         warnings.extend("(from libSBML) " + i for i in libsbml_errors)
 
+
     # if parsing failed, then send the error
     if parse_errors:
-        result["errors"].extend(errors)
-        result["warnings"].extend(warnings)
-        return result
+        return {
+            "errors": parse_errors,
+            "warnings": warnings,
+        }
+
     if model is None:  # parsed, but still could not generate model
-        result["errors"].extend(errors)
-        result["warnings"].extend(warnings)
-        return result
+        print("model failed")
+        return {
+            "errors": errors, # HERE?
+            "warnings": warnings,
+        }
 
     # model validation
-    result["errors"].extend(error)
+    result = validate_model(model)
+    result["errors"].extend(errors)
     result["warnings"].extend(warnings)
 
+    return {
+        "errors": ['LEFT OFF'],
+        "warnings": ['content'],
+    }
     
     gb_filepath = gen_filepath(genbank_id)
     if not isfile(gb_filepath):
