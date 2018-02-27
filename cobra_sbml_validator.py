@@ -5,6 +5,7 @@ from json import dumps
 from os import mkdir, unlink, path
 from os.path import isdir, isfile, join
 from Bio import Entrez, SeqIO
+Entrez.email = 'npusarla@ucsd.edu'
 import argparse 
 import re
 from warnings import catch_warnings
@@ -42,32 +43,35 @@ FOLDER_NAME = 'genbank'
 if not isdir(FOLDER_NAME):
     mkdir(FOLDER_NAME)
 
-def load_JSON(contents):
+def load_JSON(contents, filename):
     """returns model, [model_errors], "parse_errors" or None """
     errors = []
     try:
-        model_json = cobra.io.json.json.load(getreader("utf-8")(contents))
+        model_json = contents.read().decode('utf8')  
     except ValueError as e:
         return None, errors, "Invalid JSON: " + str(e)
     try:
-        model = cobra.io.json._from_dict(model_json)
+        model = cobra.io.json.from_json(model_json)
     except Exception as e:
         errors.append("Invalid model: " + str(e))
         model = None
-    try:
-        jsonschema.validate(model_json, cobra.io.json.json_schema)
-    except jsonschema.ValidationError as e:
-        # render an infomrative error message
-        if len(e.absolute_path) > 0:
-            error_msg = "Error in "
-            for i in e.absolute_path:
-                if isinstance(i, int):
-                    error_msg = error_msg.rstrip(".") + "[%d]." % i
-                else:
-                    error_msg += str(i) + "."
-            errors.append(error_msg.rstrip(".") + ": " + e.message)
-        else:
-            errors.append(e.message)
+
+    # This code is buggy. TODO fix jsonschema validation later    
+    # try:
+    #     jsonschema.validate(model_json, cobra.io.json.json_schema)
+    # except jsonschema.ValidationError as e:
+    #     # render an infomrative error message
+    #     if len(e.absolute_path) > 0:
+    #         error_msg = "Error in "
+    #         for i in e.absolute_path:
+    #             if isinstance(i, int):
+    #                 error_msg = error_msg.rstrip(".") + "[%d]." % i
+    #             else:
+    #                 error_msg += str(i) + "."
+    #         errors.append(error_msg.rstrip(".") + ": " + e.message)
+    #     else:
+    #         errors.append(e.message)
+
     return model, errors, None
 
 
@@ -160,13 +164,16 @@ def validate_model(model):
         return {"errors": errors, "warnings": warnings}
 
     # if there is no objective, then we know why the objective was low
-    if len(model.objective) == 0:
+    objectives_dict = cobra.util.solver.linear_reaction_coefficients(model)
+
+    if len(objectives_dict) == 0:
         warnings.append("model has no objective function")
     elif solution.f <= 0:
         warnings.append("model can not produce nonzero biomass")
     elif solution.f <= 1e-3:
         warnings.append("biomass flux %s too low" % str(solution.f))
-    if len(model.objective) > 1:
+
+    if len(objectives_dict) > 1:
         warnings.append("model should only have one reaction as the objective")
 
     return {"errors": errors, "warnings": warnings, "objective": solution.f}
@@ -192,7 +199,10 @@ def handle_uploaded_file(info, name, genbank_id):
     parse_errors = None
     if name.endswith(".json") or name.endswith(".json.gz") or name.endswith(".json.bz2"):
         print("im in")
-        model, load_json_errors, load_json_parse_errors = load_JSON(contents)
+        model, load_json_errors, load_json_parse_errors = load_JSON(contents, name)
+        print(len(model.reactions))
+        print(load_json_errors)
+        print(load_json_parse_errors)
         parse_errors = load_json_parse_errors
 
     else:
@@ -222,54 +232,65 @@ def handle_uploaded_file(info, name, genbank_id):
     result["errors"].extend(errors)
     result["warnings"].extend(warnings)
 
-    return {
-        "errors": ['LEFT OFF'],
-        "warnings": ['content'],
-    }
-    
-    gb_filepath = gen_filepath(genbank_id)
-    if not isfile(gb_filepath):
-        dl = Entrez.efetch(db='nuccore', id=data, rettype='gbwithparts',
-                         retmode='text')
-        with open(gb_filepath, 'w') as outfile:
-             outfile.write(dl.read())
-        dl.close()
-        print('------------------ DONE writing') 
-
-
-    # #pseudocode
-    gb_seq = SeqIO.read(gb_filepath, 'genbank') 
-    locus_list = []
-    for feature in gb_seq.features:
-       if feature.type == 'CDS':
-           locus_list.append(feature.qualifiers['locus_tag'][0])
-
-     #backup list 
-    gene_list = []
-    for feature in gb_seq.features:
-        if feature.type == 'CDS':
-            for i in feature:
-                if i is 'gene':
-                    gene_list.append(i[0])
-
+    #return {
+    #    "errors": ['LEFT OFF'],
+    #    "warnings": ['content'],
+    #}
+   
+    mylist = [y for y in (x.strip() for x in genbank_id.split(',')) if y != '']
     # #pseudocode for checking the genes
     model_genes = model.genes
 
     # #import IPython; IPython.embed()
-           
+               
     model_genes_id = []
     for gene in model_genes:
         model_genes_id.append(gene.id)
 
-    badGenes = list(set(model_genes_id) - set(locus_list))
-    # #backup search 
-    badGenes2 = list(set(badGenes) - set(gene_list))
-    genesToChange = list(set(badGenes).intersection(gene_list))
-    overallList = list(set(badGenes).intersection(badGenes2))
-    result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
+    overallList = []
+    for genID in mylist: 
 
-    if len(genesToChange) != 0:
-         result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
+        print("next gene")
+
+        gb_filepath = gen_filepath(genID)
+        if not isfile(gb_filepath):
+            dl = Entrez.efetch(db='nuccore', id=genID, rettype='gbwithparts',
+                             retmode='text')
+            with open(gb_filepath, 'w') as outfile:
+                 outfile.write(dl.read())
+            dl.close()
+            print('------------------ DONE writing') 
+
+        print (gb_filepath)
+        # #pseudocode
+        gb_seq = SeqIO.read(gb_filepath, 'genbank') 
+        locus_list = []
+        for feature in gb_seq.features:
+            if feature.type == 'CDS':
+                locus_tag = feature.qualifiers.get('locus_tag', None) # [locus_tag] | None
+                if locus_tag is not None:
+                    locus_list.append(locus_tag[0])
+
+         #backup list 
+        gene_list = []
+        for feature in gb_seq.features:
+            if feature.type == 'CDS':
+                for i in feature:
+                    if i is 'gene':
+                        gene_list.append(i[0])
+
+
+        badGenes = list(set(model_genes_id) - set(locus_list))
+        # #backup search 
+        badGenes2 = list(set(badGenes) - set(gene_list))
+        genesToChange = list(set(badGenes).intersection(gene_list))
+        overallList = list(set(badGenes).intersection(badGenes2))
+   
+        result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
+
+        if len(genesToChange) != 0:
+             result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
+        model_genes_id = list(set(model_genes_id) - set(locus_list))
 
 
     # self.finish(result)

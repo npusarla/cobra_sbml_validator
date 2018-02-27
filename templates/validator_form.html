@@ -9,12 +9,13 @@
 <!--dropzone-->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/dropzone/4.2.0/min/dropzone.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dropzone/4.2.0/min/dropzone.min.js"></script>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.js"></script>
 <script src="//cdnjs.cloudflare.com/ajax/libs/nanobar/0.2.1/nanobar.min.js"></script>
 
 <!--bootstrap-->
-<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
-
+<!--<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">-->
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
 
 <style>
 div.row {
@@ -64,14 +65,32 @@ function update_progress(status_url, nanobar, status_div) {
         // $(status_div.childNodes[2]).text(data['status']);
         if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
             if ('model_errors' in data || 'model_warnings' in data) {
-                // show result
-                status_div.text('Result: ' + data['model_warnings'] + data['model_errors']);
-            }
-            else {
+                if(data['model_warnings'].length == 0 && data['model_errors'].length == 0){
+                    status_div.html('Result: SUCCESS');
+                } else {
+                    var res = data['model_errors'].length + " errors";
+                    if (data['model_warnings'].length > 0) {
+                        res += " and " +  data['model_warnings'].length + " warning";
+                        if (data['model_warnings'].length > 1) res += "s";
+                    }
+                    //display errors as a list 
+                    res += "<br/>"
+                    for (var i = 0; i < data['model_errors'].length; i++) {
+                        res += '<div class="alert alert-danger" role="alert">Error: ' + data['model_errors'][i] + "</div>";
+                    }
+                    for (var i = 0; i < data['model_warnings'].length; i++) {
+                        res += '<div class="alert alert-primary" role="alert">Warning: ' + data['model_warnings'][i] + "</div>";
+                    }
+
+                    status_div.html(res);
+                }
+
+            } else {
                 // something unexpected happened
-                status_div.text('Result: ' + data['state']);
+                status_div.html('Result: ' + data['state']);
 
             }
+                
         }
         else {
             // rerun in 2 seconds
@@ -80,10 +99,6 @@ function update_progress(status_url, nanobar, status_div) {
             }, 2000);
         }
     });
-}
-
-var ex_object = {
-    'my': 'obj',
 }
 
 function update_result(data, errors, warnings) {

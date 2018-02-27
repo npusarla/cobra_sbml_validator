@@ -2,3 +2,5 @@
 gurobi.log
 *.egg-info
 nohup.out
+*.gb
+.DS_Store
