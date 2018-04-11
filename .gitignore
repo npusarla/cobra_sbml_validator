@@ -4,3 +4,4 @@ gurobi.log
 nohup.out
 *.gb
 .DS_Store
+*.xml
