@@ -76,7 +76,10 @@ function update_progress(status_url, nanobar, status_div) {
                     //display errors as a list 
                     res += "<br/>"
                     for (var i = 0; i < data['model_errors'].length; i++) {
+
                         res += '<div class="alert alert-danger" role="alert">Error: ' + data['model_errors'][i] + "</div>";
+
+               
                     }
                     for (var i = 0; i < data['model_warnings'].length; i++) {
                         res += '<div class="alert alert-primary" role="alert">Warning: ' + data['model_warnings'][i] + "</div>";
