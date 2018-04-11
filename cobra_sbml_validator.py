@@ -2,6 +2,7 @@ from gzip import GzipFile
 from bz2 import decompress as bz2_decompress
 from tempfile import NamedTemporaryFile
 from json import dumps
+import shutil 
 from os import mkdir, unlink, path
 from os.path import isdir, isfile, join
 from Bio import Entrez, SeqIO
@@ -42,6 +43,8 @@ celery.conf.update(app.config)
 FOLDER_NAME = 'genbank'
 if not isdir(FOLDER_NAME):
     mkdir(FOLDER_NAME)
+#else:
+    #shutil.rmtree(FOLDER_NAME)
 
 def load_JSON(contents, filename):
     """returns model, [model_errors], "parse_errors" or None """
@@ -187,6 +190,7 @@ def gen_filepath(accession):
 
 @celery.task
 def handle_uploaded_file(info, name, genbank_id):
+
     contents, decompress_error = decompress_file(info, name)
     if decompress_error:
         return {
