@@ -2,9 +2,11 @@ from gzip import GzipFile
 from bz2 import decompress as bz2_decompress
 from tempfile import NamedTemporaryFile
 from json import dumps
+import shutil 
 from os import mkdir, unlink, path
 from os.path import isdir, isfile, join
 from Bio import Entrez, SeqIO
+Entrez.email = 'npusarla@ucsd.edu'
 import argparse 
 import re
 from warnings import catch_warnings
@@ -41,6 +43,8 @@ celery.conf.update(app.config)
 FOLDER_NAME = 'genbank'
 if not isdir(FOLDER_NAME):
     mkdir(FOLDER_NAME)
+#else:
+    #shutil.rmtree(FOLDER_NAME)
 
 def load_JSON(contents, filename):
     """returns model, [model_errors], "parse_errors" or None """
@@ -186,6 +190,7 @@ def gen_filepath(accession):
 
 @celery.task
 def handle_uploaded_file(info, name, genbank_id):
+
     contents, decompress_error = decompress_file(info, name)
     if decompress_error:
         return {
@@ -236,6 +241,9 @@ def handle_uploaded_file(info, name, genbank_id):
     #    "warnings": ['content'],
     #}
    
+
+    mylist = [y for y in (x.strip() for x in genbank_id.split(',')) if y != '']
+
     gb_filepath = gen_filepath(genbank_id)
     if not isfile(gb_filepath):
         dl = Entrez.efetch(db='nuccore', id=genbank_id, rettype='gbwithparts',
@@ -261,14 +269,57 @@ def handle_uploaded_file(info, name, genbank_id):
                 if i is 'gene':
                     gene_list.append(i[0])
 
+
     # #pseudocode for checking the genes
     model_genes = model.genes
 
     # #import IPython; IPython.embed()
-           
+               
     model_genes_id = []
     for gene in model_genes:
         model_genes_id.append(gene.id)
+
+
+    overallList = []
+    for genID in mylist: 
+
+        print("next gene")
+
+        gb_filepath = gen_filepath(genID)
+        if not isfile(gb_filepath):
+            dl = Entrez.efetch(db='nuccore', id=genID, rettype='gbwithparts',
+                             retmode='text')
+            with open(gb_filepath, 'w') as outfile:
+                 outfile.write(dl.read())
+            dl.close()
+            print('------------------ DONE writing') 
+
+        print (gb_filepath)
+        # #pseudocode
+        gb_seq = SeqIO.read(gb_filepath, 'genbank') 
+        locus_list = []
+        for feature in gb_seq.features:
+            if feature.type == 'CDS':
+                locus_tag = feature.qualifiers.get('locus_tag', None) # [locus_tag] | None
+                if locus_tag is not None:
+                    locus_list.append(locus_tag[0])
+
+         #backup list 
+        gene_list = []
+        for feature in gb_seq.features:
+            if feature.type == 'CDS':
+                for i in feature:
+                    if i is 'gene':
+                        gene_list.append(i[0])
+
+
+        badGenes = list(set(model_genes_id) - set(locus_list))
+        # #backup search 
+        badGenes2 = list(set(badGenes) - set(gene_list))
+        genesToChange = list(set(badGenes).intersection(gene_list))
+        overallList = list(set(badGenes).intersection(badGenes2))
+   
+        result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
 
     badGenes = list(set(model_genes_id) - set(locus_list))
     # #backup search 
@@ -278,8 +329,10 @@ def handle_uploaded_file(info, name, genbank_id):
    
     result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
 
-    if len(genesToChange) != 0:
-         result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
+
+        if len(genesToChange) != 0:
+             result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
+        model_genes_id = list(set(model_genes_id) - set(locus_list))
 
 
     # self.finish(result)
