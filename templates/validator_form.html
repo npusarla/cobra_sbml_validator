@@ -39,19 +39,16 @@ function on_click () {
 
 //NEW PROGRESS BAR
 function start_handling_file (file, response) {
-   update_progress(response.Location, null, $('#results'));
-}
-    
-    // add task status elements 
-    div = $('<div class="progress"></div>');
-    $('#progress').append(div);
-
     // create a progress bar
-    var nanobar = new Nanobar({bg: '#44f', target: div[0].childNodes[0]});
+    var nanobar = new Nanobar({bg: '#44f', target: $('#progress')});
+    update_progress(response.Location, nanobar, $('#results'));
+}
 
-    // send ajax POST request to start background job
-    
-    //status_url = request.getResponseHeader('Location');
+
+//var nanobar = new Nanobar({bg: '#44f', target: $('#progress')});
+// send ajax POST request to start background job
+
+//status_url = request.getResponseHeader('Location');
  
 function update_progress(status_url, nanobar, status_div) {
     console.log('working')
@@ -59,10 +56,9 @@ function update_progress(status_url, nanobar, status_div) {
     // send GET request to status URL
     $.getJSON(status_url, function(data) {
         // update UI
+
         percent = parseInt(data['current'] * 100 / data['total']);
         nanobar.go(percent);
-        $(status_div.childNodes[1]).text(percent + '%');
-        $(status_div.childNodes[2]).text(data['status']);
         if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
             if ('model_errors' in data || 'model_warnings' in data) {
                 if(data['model_warnings'].length == 0 && data['model_errors'].length == 0){
@@ -79,7 +75,6 @@ function update_progress(status_url, nanobar, status_div) {
 
                         res += '<div class="alert alert-danger" role="alert">Error: ' + data['model_errors'][i] + "</div>";
 
-               
                     }
                     for (var i = 0; i < data['model_warnings'].length; i++) {
                         res += '<div class="alert alert-primary" role="alert">Warning: ' + data['model_warnings'][i] + "</div>";
@@ -202,7 +197,7 @@ Dropzone.options.uploader = {
             <div class="dz-message">Drop SBML/JSON files here or click to upload. Compressed (gz and bz2) files are also accepted.</div>
         </form>
     </div>
-    <div id="progress"></div>
+    <div id="progress"></div> 
     <div id="results" class="container"></div>
     <!-- github ribbon -->
     <a href="https://github.com/aebrahim/cobra_sbml_validator">

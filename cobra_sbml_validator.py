@@ -244,33 +244,6 @@ def handle_uploaded_file(info, name, genbank_id):
 
     mylist = [y for y in (x.strip() for x in genbank_id.split(',')) if y != '']
 
-    gb_filepath = gen_filepath(genbank_id)
-    if not isfile(gb_filepath):
-        dl = Entrez.efetch(db='nuccore', id=genbank_id, rettype='gbwithparts',
-                         retmode='text')
-        with open(gb_filepath, 'w') as outfile:
-             outfile.write(dl.read())
-        dl.close()
-        print('------------------ DONE writing') 
-
-
-    # #pseudocode
-    gb_seq = SeqIO.read(gb_filepath, 'genbank') 
-    locus_list = []
-    for feature in gb_seq.features:
-       if feature.type == 'CDS':
-           locus_list.append(feature.qualifiers['locus_tag'][0])
-
-     #backup list 
-    gene_list = []
-    for feature in gb_seq.features:
-        if feature.type == 'CDS':
-            for i in feature:
-                if i is 'gene':
-                    gene_list.append(i[0])
-
-
-    # #pseudocode for checking the genes
     model_genes = model.genes
 
     # #import IPython; IPython.embed()
@@ -321,18 +294,10 @@ def handle_uploaded_file(info, name, genbank_id):
    
         result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
 
-    badGenes = list(set(model_genes_id) - set(locus_list))
-    # #backup search 
-    badGenes2 = list(set(badGenes) - set(gene_list))
-    genesToChange = list(set(badGenes).intersection(gene_list))
-    overallList = list(set(badGenes).intersection(badGenes2))
-   
-    result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
 
-
-        if len(genesToChange) != 0:
-             result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
-        model_genes_id = list(set(model_genes_id) - set(locus_list))
+    if len(genesToChange) != 0:
+        result['warnings'].extend(['Change ' + x + ' to locus tag name' for x in genesToChange])
+    model_genes_id = list(set(model_genes_id) - set(locus_list))
 
 
     # self.finish(result)
