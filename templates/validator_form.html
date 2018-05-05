@@ -40,7 +40,8 @@ function on_click () {
 //NEW PROGRESS BAR
 function start_handling_file (file, response) {
     // create a progress bar
-    var nanobar = new Nanobar({bg: '#44f', target: $('#progress')});
+    var target = document.getElementById('progress')
+    var nanobar = new Nanobar({ bg: '#44f', target: target });
     update_progress(response.Location, nanobar, $('#results'));
 }
 
@@ -56,9 +57,10 @@ function update_progress(status_url, nanobar, status_div) {
     // send GET request to status URL
     $.getJSON(status_url, function(data) {
         // update UI
-
-        percent = parseInt(data['current'] * 100 / data['total']);
+        console.log(data['current'], data['total'])
+        var percent = parseInt(data['current'] * 100 / data['total']);
         nanobar.go(percent);
+        status_div.html(data['status'])
         if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
             if ('model_errors' in data || 'model_warnings' in data) {
                 if(data['model_warnings'].length == 0 && data['model_errors'].length == 0){
@@ -197,7 +199,7 @@ Dropzone.options.uploader = {
             <div class="dz-message">Drop SBML/JSON files here or click to upload. Compressed (gz and bz2) files are also accepted.</div>
         </form>
     </div>
-    <div id="progress"></div> 
+    <div id="progress" style="margin: 20px; border: 1px solid black; height: 6px;"></div> 
     <div id="results" class="container"></div>
     <!-- github ribbon -->
     <a href="https://github.com/aebrahim/cobra_sbml_validator">

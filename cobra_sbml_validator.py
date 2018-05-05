@@ -12,6 +12,7 @@ import re
 from warnings import catch_warnings
 from codecs import getreader
 import time
+import random 
 
 from six import BytesIO, StringIO, iteritems
 import jsonschema
@@ -164,7 +165,7 @@ def validate_model(model):
     if solution.status != "optimal":
         errors.append("model can not be solved (status '%s')" %
                       solution.status)
-        return {"errors": errors, "warnings": warnings}
+        return {"errors": errors, "warnings": warnings, "current": 0, "total": 0, "status": ''}
 
     # if there is no objective, then we know why the objective was low
     objectives_dict = cobra.util.solver.linear_reaction_coefficients(model)
@@ -179,7 +180,8 @@ def validate_model(model):
     if len(objectives_dict) > 1:
         warnings.append("model should only have one reaction as the objective")
 
-    return {"errors": errors, "warnings": warnings, "objective": solution.f}
+    return {"errors": errors, "warnings": warnings, "objective": solution.f, "current": 0, "total": 0,
+            "status": ''}
 
 
 def gen_filepath(accession):
@@ -188,14 +190,16 @@ def gen_filepath(accession):
 # def write_error(self, status_code, reason="", **kwargs):
 #     self.write(reason)
 
-@celery.task
-def handle_uploaded_file(info, name, genbank_id):
+@celery.task(bind=True)
+def handle_uploaded_file(self, info, name, genbank_id):
 
     contents, decompress_error = decompress_file(info, name)
     if decompress_error:
         return {
             "errors": [decompress_error],
             "warnings": [],
+            "current": 100,
+            "total": 100,
         }
 
     errors = []
@@ -222,6 +226,8 @@ def handle_uploaded_file(info, name, genbank_id):
         return {
             "errors": parse_errors,
             "warnings": warnings,
+            "current": 100,
+            "total": 100,
         }
 
     if model is None:  # parsed, but still could not generate model
@@ -229,18 +235,17 @@ def handle_uploaded_file(info, name, genbank_id):
         return {
             "errors": errors, # HERE?
             "warnings": warnings,
+            "current": 100,
+            "total": 100,
         }
 
     # model validation
     result = validate_model(model)
+    self.update_state(state='PROGRESS',
+                          meta={'current': 50, 'total': 100, 'status': 'validating model'})
     result["errors"].extend(errors)
     result["warnings"].extend(warnings)
 
-    #return {
-    #    "errors": ['LEFT OFF'],
-    #    "warnings": ['content'],
-    #}
-   
 
     mylist = [y for y in (x.strip() for x in genbank_id.split(',')) if y != '']
 
@@ -254,8 +259,16 @@ def handle_uploaded_file(info, name, genbank_id):
 
 
     overallList = []
+    self.update_state(state='PROGRESS',
+                          meta={'current': 60, 'total': 100, 'status': 'checking first geneID'})
+    length = len(mylist)
+    step = 40/length
+    k = 0
     for genID in mylist: 
 
+        self.update_state(state='PROGRESS',
+                          meta={'current': 60+k, 'total': 100, 'status': 'checking next geneID'})
+        k = k + step 
         print("next gene")
 
         gb_filepath = gen_filepath(genID)
@@ -306,6 +319,8 @@ def handle_uploaded_file(info, name, genbank_id):
     # print('------------------ DONE getting genes')
     
     # #self.finish({ 'status': 'downloaded' })
+    result["current"] = 100
+    result["total"] = 100
     return result
 
 
@@ -317,6 +332,8 @@ def taskstatus(task_id):
         # job did not start yet
         response = {
             'state': task.state,
+            'total': 1,
+            'current': 0,
             'status': 'Pending...'
         }
     #or I can change this to only when its successful 
@@ -325,12 +342,16 @@ def taskstatus(task_id):
             'state': task.state,
             'model_warnings': task.info.get('warnings', []),
             'model_errors': task.info.get('errors', []),
+            'total': task.info.get('total', ''),
+            'current': task.info.get('current', ''),
             'status': task.info.get('status', '')
         }
     else:
         # something went wrong in the background job
         response = {
             'state': task.state,
+            'current': 1,
+            'total': 1,
             'status': str(task.info),  # this is the exception raised
         }
     return jsonify(response)
