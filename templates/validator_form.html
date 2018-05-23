@@ -193,22 +193,25 @@ Dropzone.options.uploader = {
 </script>
 </head>
 <body>
-    <h1>Validate COBRA models in SBML or JSON</h1>
-    <div id="dropzone" class="container">
-        <form action="upload" class="dropzone" id="uploader">
-            <div class="dz-message">Drop SBML/JSON files here or click to upload. Compressed (gz and bz2) files are also accepted.</div>
-        </form>
+    <div class="text-center">
+        <h1>Validate COBRA models in SBML or JSON</h1>
+        <div id="dropzone" style="margin: 20px; border: 3px solid darkblue;" class="container">
+            <form action="upload" class="dropzone" id="uploader">
+                <div class="dz-message">Drop SBML/JSON files here or click to upload. Compressed (gz and bz2) files are also accepted.</div>
+            </form>
+        </div>
+        <div>
+            <b>NCBI Genome Accession:</b><br>
+            <input class="border border-dark" type="text" id="identifier" placeholder="e.g. NC_000913.3"><br>
+            <br>
+            <button class ="btn btn-info" id="open" onClick="on_click()">GO</button>
+        </div>
+        <div id="progress" style="margin: 20px; border: 1px solid black; height: 10px;"></div> 
+        <div id="results" class="container"></div>
+        <!-- github ribbon -->
+        <a href="https://github.com/aebrahim/cobra_sbml_validator">
+            <img style="position: absolute; top: 0; right: 0; border;" src="https://camo.githubusercontent.com/a6677b08c955af8400f44c6298f40e7d19cc5b2d/68747470733a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f677261795f3664366436642e706e67" alt="Fork me on GitHub" data-canonical-src="https://s3.amazonaws.com/github/ribbons/forkme_right_gray_6d6d6d.png">
+        </a>
     </div>
-    <div id="progress" style="margin: 20px; border: 1px solid black; height: 6px;"></div> 
-    <div id="results" class="container"></div>
-    <!-- github ribbon -->
-    <a href="https://github.com/aebrahim/cobra_sbml_validator">
-        <img style="position: absolute; top: 0; right: 0; border;" src="https://camo.githubusercontent.com/a6677b08c955af8400f44c6298f40e7d19cc5b2d/68747470733a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f677261795f3664366436642e706e67" alt="Fork me on GitHub" data-canonical-src="https://s3.amazonaws.com/github/ribbons/forkme_right_gray_6d6d6d.png">
-    </a>
     
-    <div>
-        NCBI Genome Accession:<br>
-        <input type="text" id="identifier"><br>
-        <button id="open" onClick="on_click()">GO</button>
-    </div>
 </body>

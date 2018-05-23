@@ -242,7 +242,7 @@ def handle_uploaded_file(self, info, name, genbank_id):
     # model validation
     result = validate_model(model)
     self.update_state(state='PROGRESS',
-                          meta={'current': 50, 'total': 100, 'status': 'validating model'})
+                          meta={'current': 20, 'total': 100, 'status': 'validating model'})
     result["errors"].extend(errors)
     result["warnings"].extend(warnings)
 
@@ -260,15 +260,17 @@ def handle_uploaded_file(self, info, name, genbank_id):
 
     overallList = []
     self.update_state(state='PROGRESS',
-                          meta={'current': 60, 'total': 100, 'status': 'checking first geneID'})
+                          meta={'current': 30, 'total': 100, 'status': 'checking first geneID'})
     length = len(mylist)
-    step = 40/length
+    step = 70/length
     k = 0
+    counter = 1 
     for genID in mylist: 
 
         self.update_state(state='PROGRESS',
-                          meta={'current': 60+k, 'total': 100, 'status': 'checking next geneID'})
+                          meta={'current': 30+k, 'total': 100, 'status': 'checking %d geneID' %(counter)})
         k = k + step 
+        counter = counter + 1
         print("next gene")
 
         gb_filepath = gen_filepath(genID)
