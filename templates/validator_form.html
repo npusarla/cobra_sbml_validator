@@ -73,13 +73,14 @@ function update_progress(status_url, nanobar, status_div) {
                     }
                     //display errors as a list 
                     res += "<br/>"
+                    for (var i = 0; i < data['model_warnings'].length; i++) {
+                        res += '<div class="alert alert-primary" role="alert">Warning: ' + data['model_warnings'][i] + "</div>";
+                    }
+
                     for (var i = 0; i < data['model_errors'].length; i++) {
 
                         res += '<div class="alert alert-danger" role="alert">Error: ' + data['model_errors'][i] + "</div>";
 
-                    }
-                    for (var i = 0; i < data['model_warnings'].length; i++) {
-                        res += '<div class="alert alert-primary" role="alert">Warning: ' + data['model_warnings'][i] + "</div>";
                     }
 
                     status_div.html(res);
@@ -176,8 +177,14 @@ function onSendingFile(file, xhr, formData) {
     formData.append('ncbi_accession', FILE)
 }
 
+function alertExcessFiles(file){
+    alert("No more files please!");
+    this.removeFile(file); 
+}
+
 console.log('init code')
 Dropzone.options.uploader = {
+    maxFiles: 1,
     autoProcessQueue : false,
     uploadMultiple: false,
     maxFilesize: 25,
@@ -187,6 +194,7 @@ Dropzone.options.uploader = {
         this.on("success", start_handling_file);
         this.on("error", onUploadFail);
         this.on("sending", onSendingFile);
+        this.on("maxfilesexceeded", alertExcessFiles);
     },
 };
 
@@ -195,7 +203,10 @@ Dropzone.options.uploader = {
 <body>
     <div class="text-center">
         <h1>Validate COBRA models in SBML or JSON</h1>
-        <div id="dropzone" style="margin: 20px; border: 3px solid darkblue;" class="container">
+        <p class="lead" style="font-size: 15px;">
+            Use this tool to validate your model before uploading it to BIGG
+        </p>
+        <div id="dropzone" style="margin: 20px; border: 3px solid darkblue; padding: 0;" class="container">
             <form action="upload" class="dropzone" id="uploader">
                 <div class="dz-message">Drop SBML/JSON files here or click to upload. Compressed (gz and bz2) files are also accepted.</div>
             </form>

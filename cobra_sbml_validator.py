@@ -259,8 +259,6 @@ def handle_uploaded_file(self, info, name, genbank_id):
 
 
     overallList = []
-    self.update_state(state='PROGRESS',
-                          meta={'current': 30, 'total': 100, 'status': 'checking first geneID'})
     length = len(mylist)
     step = 70/length
     k = 0
@@ -268,21 +266,22 @@ def handle_uploaded_file(self, info, name, genbank_id):
     for genID in mylist: 
 
         self.update_state(state='PROGRESS',
-                          meta={'current': 30+k, 'total': 100, 'status': 'checking %d geneID' %(counter)})
-        k = k + step 
+                          meta={'current': 30+k, 'total': 100, 
+                          'status': 'checking %d geneID and downloading corresponding genome from NCBI' %(counter)})
         counter = counter + 1
         print("next gene")
 
         gb_filepath = gen_filepath(genID)
+
         if not isfile(gb_filepath):
             dl = Entrez.efetch(db='nuccore', id=genID, rettype='gbwithparts',
                              retmode='text')
             with open(gb_filepath, 'w') as outfile:
                  outfile.write(dl.read())
             dl.close()
+
             print('------------------ DONE writing') 
 
-        print (gb_filepath)
         # #pseudocode
         gb_seq = SeqIO.read(gb_filepath, 'genbank') 
         locus_list = []
@@ -292,6 +291,9 @@ def handle_uploaded_file(self, info, name, genbank_id):
                 if locus_tag is not None:
                     locus_list.append(locus_tag[0])
 
+        self.update_state(state='PROGRESS',
+                          meta={'current': 30+k+(step/3), 'total': 100, 'status': 'Retreiving the list of genes'})
+
          #backup list 
         gene_list = []
         for feature in gb_seq.features:
@@ -300,6 +302,10 @@ def handle_uploaded_file(self, info, name, genbank_id):
                     if i is 'gene':
                         gene_list.append(i[0])
 
+        self.update_state(state='PROGRESS',
+                          meta={'current': 30+k+(0.66*step), 'total': 100, 
+                          'status': 'Checking model genes against reference genes'})
+
 
         badGenes = list(set(model_genes_id) - set(locus_list))
         # #backup search 
@@ -307,7 +313,9 @@ def handle_uploaded_file(self, info, name, genbank_id):
         genesToChange = list(set(badGenes).intersection(gene_list))
         overallList = list(set(badGenes).intersection(badGenes2))
    
-        result['errors'].extend([x + ' is not a valid gene' for x in badGenes2])
+        result['errors'].extend(['Model gene ' + x + ' was not found in reference genome(s)' for x in badGenes2])
+
+        k = k + step 
 
 
     if len(genesToChange) != 0:
